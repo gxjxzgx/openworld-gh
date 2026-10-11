@@ -1,6 +1,5 @@
 name: openworld-stock-watch
 
-# 每 10 分钟查一次免费 VPS 库存, 有货就 Telegram 推送 + 自动领取
 on:
   schedule:
     - cron: '*/2 * * * *'
