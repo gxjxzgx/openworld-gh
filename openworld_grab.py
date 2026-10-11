@@ -1,26 +1,4 @@
 #!/usr/bin/env python3
-"""
-Openworld 免费 VPS 库存监控 + 自动领取 (for GitHub Actions, 每 10 分钟一轮)
-
-流程:
-  1. 恢复上轮保存的 cookie(如有), 访问 /createvps
-  2. 若被踢到登录页: 填邮箱 -> Continue -> 填密码 -> 提交
-     若 Clerk 要邮箱验证码: 用 Gmail IMAP(App Password)自动读取最新验证码填入
-  3. 检查 "Free FREE PROXMOX" 是否有货
-  4. 有货: Telegram 推送告警, 然后尝试自动领取(选 Debian 13, 走完 Finalize Deployment)
-     若遇到验证码/CAPTCHA 挡住: 立即 Telegram 推送, 人工接手
-  5. 保存 cookie, 结束
-
-环境变量 (全部从 GitHub Secrets 注入, 不要写死在代码里):
-  OPENWORLD_EMAIL       openworld 登录邮箱
-  OPENWORLD_PASSWORD    openworld 登录密码
-  GMAIL_APP_PASSWORD    Gmail 应用专用密码(用于 IMAP 自动读 Clerk 验证码, 可选)
-  TG_BOT_TOKEN          Telegram Bot Token(可选, 用于推送)
-  TG_CHAT_ID            Telegram Chat ID(可选)
-  COOKIE_FILE           cookie 保存路径, 默认 cookies.json
-  DRY_RUN=1             只查库存不领取(测试用)
-"""
-
 import imaplib
 import email as email_lib
 import json
