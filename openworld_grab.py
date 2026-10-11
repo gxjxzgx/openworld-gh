@@ -161,9 +161,9 @@ def do_login(page):
     pwd_input.fill(PASSWORD)
     log("密码已填")
 
-    # 4. 提交
-    submit = page.locator('button[type="submit"]').first
-    submit.click()
+    # 4. 提交 (密码页的按钮也是 "Continue")
+    submit = page.get_by_role("button", name="Continue")
+    submit.click(timeout=15000)
     log("已提交登录")
     page.wait_for_timeout(4000)
 
