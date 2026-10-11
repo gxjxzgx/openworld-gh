@@ -167,16 +167,31 @@ def do_login(page):
     log("已提交登录")
     page.wait_for_timeout(4000)
 
-    # 5. 是否要邮箱验证码
+    # 5. 是否要邮箱验证码 (等久一点, 看截图确认状态)
+    page.wait_for_timeout(8000)
+    page.screenshot(path="after_submit.png")
     body_text = page.inner_text("body")
-    if re.search(r"verification code|Enter.*code|验证码", body_text, re.I):
+    # 验证码框的多种特征: 文字提示 OR 数字输入框 OR Clerk 的 OTP 组件
+    code_needed = (
+        re.search(r"verification code|enter.*code|check your email|验证码|one-time", body_text, re.I)
+        or page.locator('input[inputmode="numeric"], input[name="code"], input[autocomplete="one-time-code"]').count() > 0
+    )
+    if code_needed:
         log("Clerk 要求邮箱验证码, 尝试自动读取")
         code = get_clerk_code()
         if not code:
             tg("⚠️ Openworld 登录需要邮箱验证码, 自动读取失败, 请人工处理")
             return False
-        code_input = page.locator('input[name="code"], input[placeholder*="code" i], input[inputmode="numeric"]').first
-        code_input.wait_for(timeout=10000)
+        code_input = page.locator(
+            'input[inputmode="numeric"], input[name="code"], '
+            'input[autocomplete="one-time-code"], input[placeholder*="code" i]'
+        ).first
+        try:
+            code_input.wait_for(timeout=15000)
+        except Exception:
+            page.screenshot(path="no_code_input.png")
+            log("检测到验证提示但没找到输入框")
+            return False
         code_input.fill(code)
         log("验证码已填")
         page.wait_for_timeout(2000)
