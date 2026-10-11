@@ -1,9 +1,7 @@
 name: openworld-stock-watch
 
 on:
-  schedule:
-    - cron: '*/2 * * * *'
-  workflow_dispatch:  # 允许手动点 Run workflow 立即跑一次
+  workflow_dispatch:  # 只保留手动触发，由 Cloudflare Workers 定时调用
 
 jobs:
   check:
