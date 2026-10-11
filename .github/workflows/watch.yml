@@ -1,0 +1,65 @@
+name: openworld-stock-watch
+
+# 每 10 分钟查一次免费 VPS 库存, 有货就 Telegram 推送 + 自动领取
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:  # 允许手动点 Run workflow 立即跑一次
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 缓存浏览器内核, 不用每轮都下载
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+
+      # 恢复上轮保存的 cookie(免得每轮都重新登录)
+      - name: Restore cookies
+        uses: actions/cache/restore@v4
+        with:
+          path: cookies.json
+          key: openworld-cookies
+          restore-keys: openworld-cookies-
+
+      - name: Install deps
+        run: |
+          pip install playwright
+          # runner 自带 sudo, --with-deps 一次装好浏览器和系统依赖
+          playwright install --with-deps chromium
+
+      - name: Run stock check
+        env:
+          OPENWORLD_EMAIL: ${{ secrets.OPENWORLD_EMAIL }}
+          OPENWORLD_PASSWORD: ${{ secrets.OPENWORLD_PASSWORD }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python openworld_grab.py
+
+      # 保存本轮 cookie, 供下轮复用
+      - name: Save cookies
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cookies.json
+          key: openworld-cookies-${{ github.run_id }}
+
+      # 出错时上传截图, 方便看是哪一步挂了
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots-${{ github.run_id }}
+          path: "*.png"
+          retention-days: 3
