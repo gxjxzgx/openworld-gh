@@ -61,3 +61,12 @@ jobs:
           name: debug-screenshots-${{ github.run_id }}
           path: "*.png"
           retention-days: 3
+
+      # 清理旧运行记录, 只保留最近 10 条
+      - name: Cleanup old runs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh api "repos/gxjxzgx/openworld-gh/actions/runs?per_page=100" --jq '.workflow_runs[].id' | \
+          tail -n +11 | xargs -I{} gh api -X DELETE "repos/gxjxzgx/openworld-gh/actions/runs/{}" || true
