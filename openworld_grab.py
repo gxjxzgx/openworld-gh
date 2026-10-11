@@ -101,6 +101,13 @@ def get_clerk_code(timeout=150):
                         ts = email_lib.utils.mktime_tz(date_tuple)
                         if time.time() - ts < 600:
                             best = codes[0]
+                            # 读到码后删除该邮件, 不留验证码在收件箱
+                            try:
+                                m.store(i, "+FLAGS", "\\Deleted")
+                                m.expunge()
+                                log("验证码邮件已删除")
+                            except Exception as e:
+                                log(f"删除验证码邮件失败: {e}")
                             break
             m.logout()
             if best:
