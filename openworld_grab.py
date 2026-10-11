@@ -117,7 +117,18 @@ def do_login(page):
     """执行登录流程, 返回 True/False"""
     log("开始登录流程")
     page.goto(f"{BASE}/login", timeout=30000)
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(2500)
+
+    # 0. 点 "Sign in" 按钮, 拉起 Clerk 登录框
+    signin_btn = page.locator('button:has-text("Sign in")').first
+    try:
+        signin_btn.wait_for(timeout=10000)
+        signin_btn.click()
+        log('已点 "Sign in"')
+        page.wait_for_timeout(3000)
+    except Exception:
+        log('"Sign in" 按钮没找到, 可能已在登录框内或页面结构变了')
+        page.screenshot(path="login_no_signin.png")
 
     # 1. 填邮箱 (Clerk 用 name="identifier", 不是 email)
     email_input = page.locator(
