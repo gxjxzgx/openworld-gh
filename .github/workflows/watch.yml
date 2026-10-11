@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
       # 缓存浏览器内核, 不用每轮都下载
       - name: Cache Playwright browsers
@@ -31,8 +32,7 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install playwright
-          # runner 自带 sudo, --with-deps 一次装好浏览器和系统依赖
+          pip install -r requirements.txt
           playwright install --with-deps chromium
 
       - name: Run stock check
