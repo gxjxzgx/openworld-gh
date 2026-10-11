@@ -299,12 +299,22 @@ def main():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
         )
-        # 恢复 cookie
-        if os.path.exists(COOKIE_FILE):
+        # 恢复 cookie: 优先用 OPENWORLD_COOKIES secret, 其次本地文件
+        restored = False
+        secret_cookies = os.environ.get("OPENWORLD_COOKIES", "").strip()
+        if secret_cookies:
+            try:
+                cookies = json.loads(secret_cookies)
+                ctx.add_cookies(cookies)
+                log(f"已从 secret 恢复 {len(cookies)} 个 cookie")
+                restored = True
+            except Exception as e:
+                log(f"secret cookie 恢复失败: {e}")
+        if not restored and os.path.exists(COOKIE_FILE):
             try:
                 cookies = json.load(open(COOKIE_FILE))
                 ctx.add_cookies(cookies)
-                log(f"已恢复 {len(cookies)} 个 cookie")
+                log(f"已从文件恢复 {len(cookies)} 个 cookie")
             except Exception as e:
                 log(f"cookie 恢复失败: {e}")
         page = ctx.new_page()
@@ -324,10 +334,15 @@ def main():
 
             in_stock = check_stock(page)
 
-            # 保存 cookie (无论是否有货都更新)
+            # 保存 cookie (无论是否有货都更新): 写文件 + 输出到 stdout 供更新 secret
             try:
+                cookies = ctx.cookies()
                 with open(COOKIE_FILE, "w") as f:
-                    json.dump(ctx.cookies(), f)
+                    json.dump(cookies, f)
+                # 输出标记行, 方便从日志提取更新 secret (cookie 内容 base64, 避免换行问题)
+                import base64
+                b64 = base64.b64encode(json.dumps(cookies).encode()).decode()
+                print(f"COOKIE_UPDATE_B64:{b64}", flush=True)
                 log("cookie 已更新保存")
             except Exception as e:
                 log(f"cookie 保存失败: {e}")
