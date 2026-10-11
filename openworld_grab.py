@@ -144,12 +144,9 @@ def do_login(page):
     email_input.fill(EMAIL)
     log("邮箱已填")
 
-    # 2. 点 Continue
-    cont = page.locator(
-        'button:has-text("Continue"), button:has-text("继续"), button[type="submit"]'
-    ).first
-    cont.wait_for(timeout=10000)
-    cont.click()
+    # 2. 点 Continue (用 role 定位, 避开页面上隐藏的按钮)
+    cont = page.get_by_role("button", name="Continue")
+    cont.click(timeout=15000)
     log("已点 Continue")
     page.wait_for_timeout(2500)
 
@@ -184,9 +181,9 @@ def do_login(page):
         log("验证码已填")
         page.wait_for_timeout(2000)
         # 点确认
-        confirm = page.locator('button:has-text("Continue"), button:has-text("Verify"), button[type="submit"]').first
+        confirm = page.get_by_role("button", name=re.compile("Continue|Verify", re.I))
         if confirm.count():
-            confirm.click()
+            confirm.first.click(timeout=15000)
         page.wait_for_timeout(4000)
 
     # 6. 确认登录成功
@@ -233,9 +230,12 @@ def check_stock(page):
 def claim(page):
     """尝试领取, 返回 (成功, 说明)"""
     log("开始领取流程")
-    deploy_btn = page.locator('button:has-text("Deploy Free VPS"), a:has-text("Deploy Free VPS")').first
-    deploy_btn.wait_for(timeout=15000)
-    deploy_btn.click()
+    deploy_btn = page.get_by_role("button", name=re.compile("Deploy Free VPS", re.I))
+    if not deploy_btn.count():
+        # 可能是链接形式
+        deploy_btn = page.locator('a:has-text("Deploy Free VPS")')
+    deploy_btn.first.wait_for(timeout=15000)
+    deploy_btn.first.click()
     log("已点 Deploy Free VPS")
     page.wait_for_timeout(3000)
 
@@ -254,9 +254,9 @@ def claim(page):
         page.screenshot(path="captcha.png")
         return False, "遇到 CAPTCHA/人机验证, 需人工处理"
 
-    fin = page.locator('button:has-text("Finalize"), button:has-text("Deploy"), button:has-text("Confirm")').first
+    fin = page.get_by_role("button", name=re.compile("Finalize|Confirm", re.I))
     if fin.count():
-        fin.click()
+        fin.first.click(timeout=15000)
         log("已点最终确认")
         page.wait_for_timeout(5000)
     else:
