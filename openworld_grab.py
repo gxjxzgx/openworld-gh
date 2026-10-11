@@ -119,22 +119,37 @@ def do_login(page):
     page.goto(f"{BASE}/login", timeout=30000)
     page.wait_for_timeout(2000)
 
-    # 1. 填邮箱
-    email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="mail" i]').first
-    email_input.wait_for(timeout=15000)
+    # 1. 填邮箱 (Clerk 用 name="identifier", 不是 email)
+    email_input = page.locator(
+        'input[name="identifier"], input[type="email"], input[name="email"], '
+        'input[placeholder*="mail" i], input[placeholder*="邮箱" i]'
+    ).first
+    try:
+        email_input.wait_for(timeout=20000)
+    except Exception:
+        page.screenshot(path="login_no_email.png")
+        log(f"没找到邮箱输入框, url={page.url}, title={page.title()}")
+        raise
     email_input.fill(EMAIL)
     log("邮箱已填")
 
     # 2. 点 Continue
-    cont = page.locator('button:has-text("Continue")').first
+    cont = page.locator(
+        'button:has-text("Continue"), button:has-text("继续"), button[type="submit"]'
+    ).first
     cont.wait_for(timeout=10000)
     cont.click()
     log("已点 Continue")
     page.wait_for_timeout(2500)
 
     # 3. 填密码
-    pwd_input = page.locator('input[type="password"]').first
-    pwd_input.wait_for(timeout=15000)
+    pwd_input = page.locator('input[type="password"], input[name="password"]').first
+    try:
+        pwd_input.wait_for(timeout=15000)
+    except Exception:
+        page.screenshot(path="login_no_pwd.png")
+        log(f"没找到密码框, url={page.url}")
+        raise
     pwd_input.fill(PASSWORD)
     log("密码已填")
 
