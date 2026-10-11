@@ -45,6 +45,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          OPENWORLD_COOKIES: ${{ secrets.OPENWORLD_COOKIES }}
         run: python openworld_grab.py
 
       # 保存本轮 cookie, 供下轮复用
