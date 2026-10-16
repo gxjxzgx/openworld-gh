@@ -178,6 +178,33 @@ function startCooldown(min = COOLDOWN_MIN) {
 }
 class Cooldown extends Error {}
 
+// 复用登录 Cookie：存到 .cooldown/session.json（随 actions/cache 保存），失效才重新登录
+const SESSION_FILE = (COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.') + '/session.json';
+function saveSession() {
+  fs.mkdirSync(SESSION_FILE.split('/').slice(0, -1).join('/'), { recursive: true });
+  fs.writeFileSync(SESSION_FILE, JSON.stringify({ email: EMAIL, cookies: [...jar] }), { mode: 0o600 });
+}
+async function login() {
+  jar.clear(); csrf = null;
+  await api('/api/v1/auth/login', { method: 'POST', anonymous: true, body: { email: EMAIL, password: PASSWORD } });
+  csrf = (await api('/api/v1/auth/session')).csrf_token;
+  saveSession();
+}
+async function ensureLogin() {
+  try {
+    const st = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+    if (st.email === EMAIL && st.cookies?.length) {
+      for (const [k, v] of st.cookies) jar.set(k, v);
+      csrf = (await api('/api/v1/auth/session')).csrf_token;
+      if (csrf) { saveSession(); return '复用 Cookie 登录成功'; }
+    }
+  } catch (e) {
+    if (e.status && e.status !== 401 && e.status !== 403) throw e; // 非登录失效的错误直接抛出
+  }
+  await login();
+  return '登录成功';
+}
+
 // Worker 触发：启动通知每小时最多一次，附带期间运行次数；手动触发：每次都通知
 const IS_WORKER = (env.TRIGGER_SOURCE || '') === 'worker';
 const NOTIFY_FILE = (COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.') + '/notify.json';
@@ -201,9 +228,8 @@ async function main() {
   const left = cooldownLeft();
   if (left > 0) { log(`冷却中，还剩 ${Math.ceil(left / 60000)} 分钟，本次跳过`); return; }
 
-  await api('/api/v1/auth/login', { method: 'POST', anonymous: true, body: { email: EMAIL, password: PASSWORD } });
-  csrf = (await api('/api/v1/auth/session')).csrf_token;
-  log(`触发：${env.TRIGGER || '未知'}，登录成功 出口IP ${LOCAL_PROXY ? (env.PROXY_IP || '代理') : '直连（GitHub）'}`);
+  const how = await ensureLogin();
+  log(`触发：${env.TRIGGER || '未知'}，${how} 出口IP ${LOCAL_PROXY ? (env.PROXY_IP || '代理') : '直连（GitHub）'}`);
 
   // 已有服务器：黑名单节点删掉，合格的就结束
   if (await handleExisting()) return;
@@ -285,7 +311,9 @@ async function main() {
       }
     } catch (e) {
       log(`第${n}次出错：${e.message}`);
-      if (e.status === 401 || e.status === 403) { csrf = null; }
+      if (e.status === 401 || e.status === 403) {
+        try { await login(); log('会话失效，已重新登录'); } catch (e2) { log('重新登录失败', e2.message); }
+      }
       if (e.status === 429) await sleep(INTERVAL_SECONDS * 2);
     }
     await sleep(INTERVAL_SECONDS);
