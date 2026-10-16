@@ -17,6 +17,7 @@ const RES = {
 };
 const EXCLUDE = (env.EXCLUDE_NODES || 'node2-it').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 const COOLDOWN_MIN = Number(env.COOLDOWN_MINUTES || 30); // 删机器后暂停多少分钟
+const SUCCESS_COOLDOWN_MIN = Number(env.SUCCESS_COOLDOWN_MINUTES || 1440); // 抢到后暂停多少分钟（默认 24 小时）
 const COOLDOWN_FILE = env.COOLDOWN_FILE || '.cooldown/until';
 const RUN_SECONDS = Number(env.RUN_SECONDS || 240); // 单次运行轮询总时长
 const INTERVAL_SECONDS = Number(env.INTERVAL_SECONDS || 20); // 轮询间隔，别太小以免触发风控
@@ -140,7 +141,8 @@ async function handleExisting(notify = true) {
     } else kept.push(`${esc(b.name || b.id)} @ ${nodeLink(loc)}`);
   }
   if (kept.length) {
-    log('账号已有合格服务器，退出');
+    log(`账号已有合格服务器，暂停 ${SUCCESS_COOLDOWN_MIN} 分钟`);
+    startCooldown(SUCCESS_COOLDOWN_MIN);
     if (notify) await tg(`✅ Botkeep：账号里已有服务器（${kept.join(', ')}），无需再抢。`);
     return true;
   }
@@ -151,9 +153,9 @@ async function handleExisting(notify = true) {
 function cooldownLeft() {
   try { return Math.max(0, Number(fs.readFileSync(COOLDOWN_FILE, 'utf8')) - Date.now()); } catch { return 0; }
 }
-function startCooldown() {
+function startCooldown(min = COOLDOWN_MIN) {
   fs.mkdirSync(COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.', { recursive: true });
-  fs.writeFileSync(COOLDOWN_FILE, String(Date.now() + COOLDOWN_MIN * 60000));
+  fs.writeFileSync(COOLDOWN_FILE, String(Date.now() + min * 60000));
 }
 class Cooldown extends Error {}
 
@@ -224,7 +226,8 @@ async function main() {
           await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
           return;
         }
-        await tg(`🎉 Botkeep 抢到了！\n服务器：${esc(NAME)} ${esc(id)}\n节点：${nodeLink(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
+        startCooldown(SUCCESS_COOLDOWN_MIN);
+        await tg(`🎉 Botkeep 抢到了！\n服务器：${esc(NAME)} ${esc(id)}\n节点：${nodeLink(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app\n之后暂停 ${Math.round(SUCCESS_COOLDOWN_MIN / 60)} 小时，到时只检查机器是否还在。`);
         return;
       }
       log(`第${n}次：无容量 - ${avail?.message || ''}`);
