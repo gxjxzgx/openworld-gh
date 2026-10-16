@@ -229,7 +229,8 @@ function startNotice() {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(NOTIFY_FILE, 'utf8')); } catch {}
   st.total = (st.total || st.count || 0) + 1; // 累计总运行次数（手动 + Worker），不清零
-  const line = `运行次数：${st.total}`;
+  // 已重复运行 = 工作流累计运行次数；尝试领取 = 累计查询容量/尝试领取机器的次数（截至本次开始前）
+  const line = `已重复运行：${st.total}次\n尝试领取次数：${st.attempts || 0}次`;
   // Worker 每小时最多通知一次（留 3 分钟余量，避免 5 分钟一次的触发抖动错过整点）；手动每次都通知
   const send = !IS_WORKER || Date.now() - (st.last || 0) >= (NOTIFY_EVERY_MIN - 3) * 60000;
   if (send && IS_WORKER) st.last = Date.now();
@@ -237,6 +238,14 @@ function startNotice() {
   fs.mkdirSync(NOTIFY_FILE.split('/').slice(0, -1).join('/'), { recursive: true });
   fs.writeFileSync(NOTIFY_FILE, JSON.stringify(st));
   return { send, line };
+}
+
+// 每轮询一次就把累计尝试次数 +1 写回（随 actions/cache 保存，任何退出路径都不会丢）
+function addAttempt() {
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(NOTIFY_FILE, 'utf8')); } catch {}
+  st.attempts = (st.attempts || 0) + 1;
+  try { fs.writeFileSync(NOTIFY_FILE, JSON.stringify(st)); } catch {}
 }
 
 async function main() {
@@ -268,7 +277,7 @@ async function main() {
     `轮询：${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次`,
     `配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB`,
   ].join('\n'));
-  else log(`本小时已通知过，跳过 TG（${notice.line}）`);
+  else log(`本小时已通知过，跳过 TG（${notice.line.replace('\n', '，')}）`);
 
   const qs = new URLSearchParams({
     runtime: RUNTIME,
@@ -283,6 +292,7 @@ async function main() {
 
   while (Date.now() < deadline) {
     n++;
+    addAttempt();
     try {
       const avail = await api('/api/v1/panel/creation-availability?' + qs);
       if (avail?.allowed) {
