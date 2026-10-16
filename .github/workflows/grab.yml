@@ -2,10 +2,14 @@ name: botkeep-grab
 run-name: ${{ inputs.source == 'worker' && 'Worker 定时触发' || '手动触发' }}
 
 on:
-  workflow_dispatch: # 由 Cloudflare Worker 定时触发；手动运行可勾选重置冷却
+  workflow_dispatch: # 由 Cloudflare Worker 定时触发；手动运行可勾选重置冷却/运行次数
     inputs:
       reset:
         description: "重置冷却，立即开抢"
+        type: boolean
+        default: false
+      reset_count:
+        description: "重置运行次数（从 0 重新计数）"
         type: boolean
         default: false
       source:
@@ -46,6 +50,10 @@ jobs:
       - name: Reset cooldown
         if: inputs.reset
         run: mkdir -p .cooldown && echo 0 > .cooldown/until
+
+      - name: Reset run count
+        if: inputs.reset_count
+        run: rm -f .cooldown/notify.json
 
       # 缓存 sing-box 和 undici，避免每次下载
       - name: Cache proxy tools
