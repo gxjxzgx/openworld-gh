@@ -113,10 +113,12 @@ const nodeLink = (loc) => {
   return /\./.test(h) ? `<a href="https://${esc(h)}">${esc(h)}</a>` : esc(h);
 };
 // 返回不合格原因（null 表示合格）：白名单非空只看白名单，否则看黑名单
+// 节点匹配：node1 能匹配 node1-it、node1-de，但不会匹配 node10-xx
+const nodeHit = (info, n) => new RegExp(`(^|[^a-z0-9])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(info);
 const badNode = (info) => {
   if (!info) return null; // 读不到节点时不判定
-  if (INCLUDE.length) return INCLUDE.some((n) => info.includes(n)) ? null : `不在白名单 ${INCLUDE.join(',')}`;
-  const hit = EXCLUDE.find((n) => info.includes(n));
+  if (INCLUDE.length) return INCLUDE.some((n) => nodeHit(info, n)) ? null : `不在白名单 ${INCLUDE.join(',')}`;
+  const hit = EXCLUDE.find((n) => nodeHit(info, n));
   return hit ? `黑名单 ${hit}` : null;
 };
 const nodeLabel = (loc) => loc.hosts[0] || (loc.info.match(/node\d*-[a-z]+[a-z0-9.-]*/) || ['未知节点'])[0];
