@@ -226,14 +226,14 @@ const IS_WORKER = (env.TRIGGER_SOURCE || '') === 'worker';
 const NOTIFY_FILE = (COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.') + '/notify.json';
 const NOTIFY_EVERY_MIN = Number(env.NOTIFY_EVERY_MINUTES || 60);
 function startNotice() {
-  if (!IS_WORKER) return { send: true, line: '' };
   let st = {};
   try { st = JSON.parse(fs.readFileSync(NOTIFY_FILE, 'utf8')); } catch {}
-  st.count = (st.count || 0) + 1;
-  // 留 3 分钟余量，避免 5 分钟一次的触发抖动错过整点
-  const send = Date.now() - (st.last || 0) >= (NOTIFY_EVERY_MIN - 3) * 60000;
-  const line = st.last ? `自上次通知已运行 ${st.count} 次` : '首次运行';
-  if (send) { st.last = Date.now(); st.count = 0; }
+  st.total = (st.total || st.count || 0) + 1; // 累计总运行次数（手动 + Worker），不清零
+  const line = `运行次数：${st.total}`;
+  // Worker 每小时最多通知一次（留 3 分钟余量，避免 5 分钟一次的触发抖动错过整点）；手动每次都通知
+  const send = !IS_WORKER || Date.now() - (st.last || 0) >= (NOTIFY_EVERY_MIN - 3) * 60000;
+  if (send && IS_WORKER) st.last = Date.now();
+  delete st.count;
   fs.mkdirSync(NOTIFY_FILE.split('/').slice(0, -1).join('/'), { recursive: true });
   fs.writeFileSync(NOTIFY_FILE, JSON.stringify(st));
   return { send, line };
