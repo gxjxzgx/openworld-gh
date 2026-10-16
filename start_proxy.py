@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # 用 node_proxy.py 把 NODE_LINK 转成本地 http 代理，sing-box 后台常驻到 job 结束，
-# 并把 PROXY_URL / PROXY_IP 写进 GITHUB_ENV 供后续步骤使用。
+# 并把 LOCAL_PROXY / PROXY_IP 写进 GITHUB_ENV 供后续步骤使用。
 import json, os, socket, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 import node_proxy as np
@@ -46,4 +46,4 @@ if not ip:
     sys.exit("代理自检失败：%s" % np._read_log_tail(logpath))
 print("代理就绪，出口 IP：%s" % ip)
 with open(os.environ["GITHUB_ENV"], "a") as f:
-    f.write("PROXY_URL=%s\nPROXY_IP=%s\n" % (proxy, ip))
+    f.write("LOCAL_PROXY=%s\nPROXY_IP=%s\n" % (proxy, ip))
