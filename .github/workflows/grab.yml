@@ -1,0 +1,27 @@
+name: botkeep-grab
+
+on:
+  workflow_dispatch: # 由 Cloudflare Worker 定时触发
+
+concurrency:
+  group: botkeep-grab
+  cancel-in-progress: false
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Grab Botkeep server
+        run: node grab.mjs
+        env:
+          BOTKEEP_EMAIL: ${{ secrets.BOTKEEP_EMAIL }}
+          BOTKEEP_PASSWORD: ${{ secrets.BOTKEEP_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          RUN_SECONDS: "240"
+          INTERVAL_SECONDS: "20"
