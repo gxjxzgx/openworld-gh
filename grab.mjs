@@ -168,6 +168,24 @@ function startCooldown(min = COOLDOWN_MIN) {
 }
 class Cooldown extends Error {}
 
+// Worker 触发：启动通知每小时最多一次，附带期间运行次数；手动触发：每次都通知
+const IS_WORKER = (env.TRIGGER_SOURCE || '') === 'worker';
+const NOTIFY_FILE = (COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.') + '/notify.json';
+const NOTIFY_EVERY_MIN = Number(env.NOTIFY_EVERY_MINUTES || 60);
+function startNotice() {
+  if (!IS_WORKER) return { send: true, line: '' };
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(NOTIFY_FILE, 'utf8')); } catch {}
+  st.count = (st.count || 0) + 1;
+  // 留 3 分钟余量，避免 5 分钟一次的触发抖动错过整点
+  const send = Date.now() - (st.last || 0) >= (NOTIFY_EVERY_MIN - 3) * 60000;
+  const line = st.last ? `自上次通知已运行 ${st.count} 次` : '首次运行';
+  if (send) { st.last = Date.now(); st.count = 0; }
+  fs.mkdirSync(NOTIFY_FILE.split('/').slice(0, -1).join('/'), { recursive: true });
+  fs.writeFileSync(NOTIFY_FILE, JSON.stringify(st));
+  return { send, line };
+}
+
 async function main() {
   if (!EMAIL || !PASSWORD) throw new Error('缺少 BOTKEEP_EMAIL / BOTKEEP_PASSWORD');
   const left = cooldownLeft();
@@ -175,7 +193,7 @@ async function main() {
 
   await api('/api/v1/auth/login', { method: 'POST', anonymous: true, body: { email: EMAIL, password: PASSWORD } });
   csrf = (await api('/api/v1/auth/session')).csrf_token;
-  log(`登录成功 出口IP ${LOCAL_PROXY ? (env.PROXY_IP || '代理') : '直连（GitHub）'}`);
+  log(`触发：${env.TRIGGER || '未知'}，登录成功 出口IP ${LOCAL_PROXY ? (env.PROXY_IP || '代理') : '直连（GitHub）'}`);
 
   // 已有服务器：黑名单节点删掉，合格的就结束
   if (await handleExisting()) return;
@@ -187,7 +205,9 @@ async function main() {
   const startCommand = caps?.runtimeOptions?.[RUNTIME]?.[runtimeVersion]?.command || 'npm start';
   log('运行时', RUNTIME, runtimeVersion || '(未开放)', '启动命令', startCommand);
 
-  await tg(`🚀 Botkeep 抢机器服务已开启\n配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB\n本次轮询 ${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次\n出口：${LOCAL_PROXY ? `代理 ${esc(env.PROXY_IP || '')}` : '直连（GitHub）'}`);
+  const notice = startNotice();
+  if (notice.send) await tg(`🚀 Botkeep 抢机器服务${IS_WORKER ? '运行中（每小时通知一次）' : '已开启'}${notice.line ? `\n${notice.line}` : ''}\n配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB\n本次轮询 ${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次\n触发：${esc(env.TRIGGER || '未知')}\n出口：${LOCAL_PROXY ? `代理 ${esc(env.PROXY_IP || '')}` : '直连（GitHub）'}`);
+  else log(`本小时已通知过，跳过 TG（${notice.line}）`);
 
   const qs = new URLSearchParams({
     runtime: RUNTIME,
