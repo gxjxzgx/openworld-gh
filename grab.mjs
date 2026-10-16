@@ -91,8 +91,43 @@ async function botLocation(id, waitSec = 60) {
 }
 const badNode = (info) => EXCLUDE.find((n) => info.includes(n));
 const nodeLabel = (loc) => loc.hosts[0] || (loc.info.match(/node\d*-[a-z]+[a-z0-9.-]*/) || ['未知节点'])[0];
+// 删除服务器；创建/部署中会返回 409，等它完成再删（最多等 DELETE_WAIT 秒）
 async function deleteBot(id) {
-  await api(`/api/v1/panel/bots/${encodeURIComponent(id)}/actions`, { method: 'POST', body: { action: 'delete' } });
+  const end = Date.now() + Number(env.DELETE_WAIT || 180) * 1000;
+  while (true) {
+    try {
+      await api(`/api/v1/panel/bots/${encodeURIComponent(id)}/actions`, { method: 'POST', body: { action: 'delete' } });
+      log('已提交删除', id);
+      return true;
+    } catch (e) {
+      if (e.status === 404) return true;
+      if (e.status !== 409 || Date.now() > end) throw e;
+      log('有操作进行中，5 秒后重试删除');
+      await sleep(5);
+    }
+  }
+}
+
+// 检查账号已有服务器：黑名单节点的删掉；有合格的返回 true（直接结束）
+async function handleExisting(notify = true) {
+  const dash = await api('/api/v1/panel/dashboard');
+  const bots = Array.isArray(dash?.bots) ? dash.bots : [];
+  const kept = [];
+  for (const b of bots) {
+    const loc = await botLocation(b.id, 5);
+    const bad = badNode(loc.info);
+    if (bad) {
+      log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
+      await deleteBot(b.id);
+      await tg(`🗑 Botkeep：${b.name || b.id} 在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+    } else kept.push(`${b.name || b.id} @ ${nodeLabel(loc)}`);
+  }
+  if (kept.length) {
+    log('账号已有合格服务器，退出');
+    if (notify) await tg(`✅ Botkeep：账号里已有服务器（${kept.join(', ')}），无需再抢。`);
+    return true;
+  }
+  return false;
 }
 
 async function main() {
@@ -102,26 +137,8 @@ async function main() {
   csrf = (await api('/api/v1/auth/session')).csrf_token;
   log('登录成功');
 
-  // 已经有服务器就不再创建，避免重复
-  const dash = await api('/api/v1/panel/dashboard');
-  if (Array.isArray(dash?.bots) && dash.bots.length > 0) {
-    let kept = [];
-    for (const b of dash.bots) {
-      const loc = await botLocation(b.id, 5);
-      const bad = badNode(loc.info);
-      if (bad) {
-        log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
-        await deleteBot(b.id);
-        await tg(`🗑 Botkeep：${b.name || b.id} 在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
-        await sleep(15);
-      } else kept.push(`${b.name || b.id} @ ${nodeLabel(loc)}`);
-    }
-    if (kept.length) {
-      log('账号已有合格服务器，退出');
-      await tg(`✅ Botkeep：账号里已有服务器（${kept.join(', ')}），无需再抢。`);
-      return;
-    }
-  }
+  // 已有服务器：黑名单节点删掉，合格的就结束
+  if (await handleExisting()) return;
 
   // 取 Node.js 版本和默认启动命令
   const caps = await api('/api/v1/panel/capabilities');
@@ -186,6 +203,10 @@ async function main() {
         return;
       }
       log(`第${n}次：无容量 - ${avail?.message || ''}`);
+      if (/slot/i.test(avail?.message || '')) {
+        // 名额被占：可能是上次没删成的黑名单机器
+        if (await handleExisting(false)) { await tg('✅ Botkeep：账号已有合格服务器，停止抢。'); return; }
+      }
     } catch (e) {
       log(`第${n}次出错：${e.message}`);
       if (e.status === 401 || e.status === 403) { csrf = null; }
