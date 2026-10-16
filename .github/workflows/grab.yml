@@ -1,7 +1,16 @@
 name: botkeep-grab
 
 on:
-  workflow_dispatch: # 由 Cloudflare Worker 定时触发
+  workflow_dispatch: # 由 Cloudflare Worker 定时触发；手动运行可勾选重置冷却
+    inputs:
+      reset:
+        description: "重置冷却，立即开抢"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write # 用于删除旧的运行记录
 
 concurrency:
   group: botkeep-grab
@@ -25,6 +34,14 @@ jobs:
           key: botkeep-cooldown-${{ github.run_id }}
           restore-keys: botkeep-cooldown-
 
+      - name: Read cooldown
+        id: pre
+        run: echo "v=$(cat .cooldown/until 2>/dev/null)" >> "$GITHUB_OUTPUT"
+
+      - name: Reset cooldown
+        if: inputs.reset
+        run: mkdir -p .cooldown && echo 0 > .cooldown/until
+
       - name: Grab Botkeep server
         run: node grab.mjs
         env:
@@ -33,14 +50,32 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           EXCLUDE_NODES: "node2-it" # 不要的节点，逗号分隔
-          COOLDOWN_MINUTES: "15"    # 删机器后暂停多少分钟
+          COOLDOWN_MINUTES: "30"    # 删机器后暂停多少分钟
+          SUCCESS_COOLDOWN_MINUTES: "1440" # 抢到后暂停多少分钟（24 小时）
           RUN_SECONDS: "240"
           INTERVAL_SECONDS: "20"
 
-      # 保存冷却时间供下次运行读取
+      - name: Check cooldown change
+        id: post
+        if: always()
+        run: echo "v=$(cat .cooldown/until 2>/dev/null)" >> "$GITHUB_OUTPUT"
+
+      # 冷却时间有变化才保存，供下次运行读取
       - name: Save cooldown
-        if: always() && hashFiles('.cooldown/until') != ''
+        if: always() && steps.post.outputs.v != '' && steps.post.outputs.v != steps.pre.outputs.v
         uses: actions/cache/save@v4
         with:
           path: .cooldown
           key: botkeep-cooldown-${{ github.run_id }}
+
+      # 只保留最新 10 条运行记录
+      - name: Clean old runs
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/actions/workflows/grab.yml/runs?per_page=100" --paginate \
+            -q '.workflow_runs[] | select(.status=="completed") | .id' \
+            | tail -n +11 \
+            | xargs -r -I{} gh api -X DELETE "repos/$REPO/actions/runs/{}" || true
