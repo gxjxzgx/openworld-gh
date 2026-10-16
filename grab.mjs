@@ -1,6 +1,7 @@
 // Botkeep 免费机器抢购脚本 (Node.js 20+)
 // 流程：登录 -> 启动TG通知 -> 轮询容量 -> 有容量立即创建 Node.js 满配服务器 -> 成功TG通知
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 const BASE = 'https://api.botkeep.cloud';
 const SITE = 'https://botkeep.cloud';
 const env = process.env;
@@ -179,10 +180,25 @@ function startCooldown(min = COOLDOWN_MIN) {
 class Cooldown extends Error {}
 
 // 复用登录 Cookie：存到 .cooldown/session.json（随 actions/cache 保存），失效才重新登录
+// 缓存里的 Cookie 用 AES-256-GCM 加密，密钥来自 Secrets（STATE_KEY，未设置则由账号密码派生），
+// 即使有人通过 fork PR 读到缓存也解不开
+const STATE_KEY = crypto.createHash('sha256').update(env.STATE_KEY || `botkeep-state:${EMAIL}:${PASSWORD}`).digest();
+function seal(text) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', STATE_KEY, iv);
+  const data = Buffer.concat([c.update(text, 'utf8'), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), data]).toString('base64');
+}
+function unseal(b64) {
+  const buf = Buffer.from(b64, 'base64');
+  const d = crypto.createDecipheriv('aes-256-gcm', STATE_KEY, buf.subarray(0, 12));
+  d.setAuthTag(buf.subarray(12, 28));
+  return Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8');
+}
 const SESSION_FILE = (COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.') + '/session.json';
 function saveSession() {
   fs.mkdirSync(SESSION_FILE.split('/').slice(0, -1).join('/'), { recursive: true });
-  fs.writeFileSync(SESSION_FILE, JSON.stringify({ email: EMAIL, cookies: [...jar] }), { mode: 0o600 });
+  fs.writeFileSync(SESSION_FILE, seal(JSON.stringify({ email: EMAIL, cookies: [...jar] })), { mode: 0o600 });
 }
 async function login() {
   jar.clear(); csrf = null;
@@ -192,7 +208,7 @@ async function login() {
 }
 async function ensureLogin() {
   try {
-    const st = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+    const st = JSON.parse(unseal(fs.readFileSync(SESSION_FILE, 'utf8')));
     if (st.email === EMAIL && st.cookies?.length) {
       for (const [k, v] of st.cookies) jar.set(k, v);
       csrf = (await api('/api/v1/auth/session')).csrf_token;
@@ -310,6 +326,7 @@ async function main() {
         if (await handleExisting(true)) return;
       }
     } catch (e) {
+      if (e instanceof Cooldown) throw e; // 冷却信号交给 main 处理，别在循环里吞掉继续抢
       log(`第${n}次出错：${e.message}`);
       if (e.status === 401 || e.status === 403) {
         try { await login(); log('会话失效，已重新登录'); } catch (e2) { log('重新登录失败', e2.message); }
