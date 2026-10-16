@@ -175,7 +175,7 @@ async function main() {
 
   await api('/api/v1/auth/login', { method: 'POST', anonymous: true, body: { email: EMAIL, password: PASSWORD } });
   csrf = (await api('/api/v1/auth/session')).csrf_token;
-  log('登录成功');
+  log(`登录成功 出口IP ${LOCAL_PROXY ? (env.PROXY_IP || '代理') : '直连（GitHub）'}`);
 
   // 已有服务器：黑名单节点删掉，合格的就结束
   if (await handleExisting()) return;

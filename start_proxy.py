@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # 用 node_proxy.py 把 NODE_LINK 转成本地 http 代理，sing-box 后台常驻到 job 结束，
 # 并把 LOCAL_PROXY / PROXY_IP 写进 GITHUB_ENV 供后续步骤使用。
-import json, os, socket, subprocess, sys, time
+import contextlib, io, json, os, socket, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 import node_proxy as np
 
@@ -11,7 +11,9 @@ if not link:
     sys.exit(0)
 
 workdir = os.environ.get("RUNNER_TEMP", "/tmp")
-scheme, info = np.normalize_link(link)
+with contextlib.redirect_stdout(io.StringIO()):  # 公开仓库：不打印节点域名/SNI
+    scheme, info = np.normalize_link(link)
+print("节点协议：%s" % scheme)
 ob = np.build_outbound(scheme, info)
 bindir = os.path.expanduser("~/.cache/sing-box-%s" % np.SING_BOX_VERSION)  # 由 actions/cache 缓存
 os.makedirs(bindir, exist_ok=True)
