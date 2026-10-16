@@ -42,6 +42,38 @@ jobs:
         if: inputs.reset
         run: mkdir -p .cooldown && echo 0 > .cooldown/until
 
+      # 缓存 sing-box 和 undici，避免每次下载
+      - name: Cache proxy tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/sing-box-1.14.1
+            node_modules
+          key: proxy-tools-singbox-1.14.1-undici-v1
+
+      # 可选：Secrets 里配置 NODE_LINK（vless/vmess/trojan/ss/socks5/http）则走代理
+      - name: Start proxy
+        id: proxy
+        env:
+          NODE_LINK: ${{ secrets.NODE_LINK }}
+        run: |
+          if [ -n "$NODE_LINK" ]; then
+            if [ ! -d node_modules/undici ]; then
+              echo '{}' > package.json
+              npm i --no-save --no-package-lock --no-audit --no-fund undici >/dev/null
+            fi
+            python3 start_proxy.py
+          fi
+
+      - name: Notify proxy failure
+        if: failure() && steps.proxy.outcome == 'failure'
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -n "$TG_BOT_TOKEN" ] && curl -s -o /dev/null "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
+            --data-urlencode chat_id="$TG_CHAT_ID" --data-urlencode text="⚠️ Botkeep：代理节点连不上，本次未登录，请检查 NODE_LINK" || true
+
       - name: Grab Botkeep server
         run: node grab.mjs
         env:
