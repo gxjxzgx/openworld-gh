@@ -86,6 +86,7 @@ jobs:
           BOTKEEP_PASSWORD: ${{ secrets.BOTKEEP_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          STATE_KEY: ${{ secrets.STATE_KEY }} # 可选：缓存加密密钥，不设则由账号密码派生
           TRIGGER: ${{ inputs.source == 'worker' && 'Worker 定时' || '手动' }}
           TRIGGER_SOURCE: ${{ inputs.source }}
           NOTIFY_EVERY_MINUTES: "60" # Worker 触发时启动通知的间隔
