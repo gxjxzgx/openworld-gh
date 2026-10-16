@@ -15,7 +15,9 @@ const RES = {
   cpuLimitPercent: Number(env.CPU_PERCENT || 50),
   storageLimitMb: Number(env.STORAGE_MB || 1024),
 };
-const EXCLUDE = (env.EXCLUDE_NODES || 'node2-it').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+const list = (v) => (v || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+const INCLUDE = list(env.INCLUDE_NODES); // 白名单：非空时只要这些节点，忽略黑名单
+const EXCLUDE = (env.EXCLUDE_NODES ?? 'node2-it').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 const COOLDOWN_MIN = Number(env.COOLDOWN_MINUTES || 30); // 删机器后暂停多少分钟
 const SUCCESS_COOLDOWN_MIN = Number(env.SUCCESS_COOLDOWN_MINUTES || 1440); // 抢到后暂停多少分钟（默认 24 小时）
 const COOLDOWN_FILE = env.COOLDOWN_FILE || '.cooldown/until';
@@ -110,7 +112,13 @@ const nodeLink = (loc) => {
   const h = nodeLabel(loc);
   return /\./.test(h) ? `<a href="https://${esc(h)}">${esc(h)}</a>` : esc(h);
 };
-const badNode = (info) => EXCLUDE.find((n) => info.includes(n));
+// 返回不合格原因（null 表示合格）：白名单非空只看白名单，否则看黑名单
+const badNode = (info) => {
+  if (!info) return null; // 读不到节点时不判定
+  if (INCLUDE.length) return INCLUDE.some((n) => info.includes(n)) ? null : `不在白名单 ${INCLUDE.join(',')}`;
+  const hit = EXCLUDE.find((n) => info.includes(n));
+  return hit ? `黑名单 ${hit}` : null;
+};
 const nodeLabel = (loc) => loc.hosts[0] || (loc.info.match(/node\d*-[a-z]+[a-z0-9.-]*/) || ['未知节点'])[0];
 // 删除服务器；创建/部署中会返回 409，等它完成再删（最多等 DELETE_WAIT 秒）
 async function deleteBot(id) {
@@ -129,7 +137,7 @@ async function deleteBot(id) {
   }
 }
 
-// 检查账号已有服务器：黑名单节点的删掉；有合格的返回 true（直接结束）
+// 检查账号已有服务器：不合格节点（白名单/黑名单）的删掉；有合格的返回 true（直接结束）
 async function handleExisting(notify = true) {
   const dash = await api('/api/v1/panel/dashboard');
   const bots = Array.isArray(dash?.bots) ? dash.bots : [];
@@ -142,10 +150,10 @@ async function handleExisting(notify = true) {
     if (!loc.info) { log(`${b.name || b.id} 读不到节点，本次不处理`); unknown = true; continue; }
     const bad = badNode(loc.info);
     if (bad) {
-      log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
+      log(`已有服务器 ${b.name || b.id} 节点不合格（${bad}），删除`);
       await deleteBot(b.id);
       startCooldown();
-      await tg(`🗑 Botkeep：${esc(b.name || b.id)} 在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
+      await tg(`🗑 Botkeep：${esc(b.name || b.id)} 在 ${nodeLink(loc)}（${esc(bad)}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
       throw new Cooldown();
     } else kept.push(`${esc(b.name || b.id)} @ ${nodeLink(loc)}`);
   }
@@ -256,12 +264,12 @@ async function main() {
         const id = bot?.id || bot?.bot?.id || '';
         log('创建成功', JSON.stringify(bot).slice(0, 300));
         const loc = id ? await botLocation(id, 60) : { info: '', hosts: [] };
-        const bad = badNode(loc.info + ' ' + JSON.stringify(bot).toLowerCase());
+        const bad = badNode(loc.info);
         if (bad) {
-          log(`落在黑名单节点 ${bad}，删除并暂停 ${COOLDOWN_MIN} 分钟`);
+          log(`节点不合格（${bad}），删除并暂停 ${COOLDOWN_MIN} 分钟`);
           await deleteBot(id);
           startCooldown();
-          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
+          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（${esc(bad)}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
           return;
         }
         startCooldown(SUCCESS_COOLDOWN_MIN);
