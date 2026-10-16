@@ -51,11 +51,11 @@ jobs:
             node_modules
           key: proxy-tools-singbox-1.14.1-undici-v1
 
-      # 可选：Secrets 里配置 NODE_LINK（vless/vmess/trojan/ss/socks5/http）则走代理
+      # 可选：Secrets 里配置 PROXY_URL（vless/vmess/trojan/ss/socks5/http 节点链接）则走代理
       - name: Start proxy
         id: proxy
         env:
-          NODE_LINK: ${{ secrets.NODE_LINK }}
+          NODE_LINK: ${{ secrets.PROXY_URL || secrets.NODE_LINK }}
         run: |
           if [ -n "$NODE_LINK" ]; then
             if [ ! -d node_modules/undici ]; then
@@ -72,7 +72,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           [ -n "$TG_BOT_TOKEN" ] && curl -s -o /dev/null "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
-            --data-urlencode chat_id="$TG_CHAT_ID" --data-urlencode text="⚠️ Botkeep：代理节点连不上，本次未登录，请检查 NODE_LINK" || true
+            --data-urlencode chat_id="$TG_CHAT_ID" --data-urlencode text="⚠️ Botkeep：代理节点连不上，本次未登录，请检查 PROXY_URL" || true
 
       - name: Grab Botkeep server
         run: node grab.mjs
