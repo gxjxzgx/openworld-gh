@@ -68,7 +68,7 @@ async function tg(text) {
     await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TG_CHAT, text, disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true }),
     });
   } catch (e) { log('TG 发送失败', e.message); }
 }
@@ -84,11 +84,20 @@ async function botLocation(id, waitSec = 60) {
       const hosts = (net?.allocations || []).map((a) => a.host).filter(Boolean);
       info = (JSON.stringify(bot) + ' ' + hosts.join(' ')).toLowerCase();
       if (hosts.length || /node\d*-[a-z]+/.test(info)) return { info, hosts };
-    } catch (e) { log('读取节点失败', e.message); }
+    } catch (e) {
+      if (e.status === 404) return { info: '', hosts: [], gone: true }; // 已删除
+      log('读取节点失败', e.message);
+    }
     if (Date.now() > end) return { info, hosts: [] };
     await sleep(5);
   }
 }
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 节点显示为可点击的蓝色链接
+const nodeLink = (loc) => {
+  const h = nodeLabel(loc);
+  return /\./.test(h) ? `<a href="https://${esc(h)}">${esc(h)}</a>` : esc(h);
+};
 const badNode = (info) => EXCLUDE.find((n) => info.includes(n));
 const nodeLabel = (loc) => loc.hosts[0] || (loc.info.match(/node\d*-[a-z]+[a-z0-9.-]*/) || ['未知节点'])[0];
 // 删除服务器；创建/部署中会返回 409，等它完成再删（最多等 DELETE_WAIT 秒）
@@ -113,20 +122,25 @@ async function handleExisting(notify = true) {
   const dash = await api('/api/v1/panel/dashboard');
   const bots = Array.isArray(dash?.bots) ? dash.bots : [];
   const kept = [];
+  let unknown = false;
   for (const b of bots) {
+    if (/delet/i.test(String(b.status || b.state || b.operation?.phase || ''))) { log(`${b.name || b.id} 正在删除，忽略`); continue; }
     const loc = await botLocation(b.id, 5);
+    if (loc.gone) { log(`${b.name || b.id} 已删除，忽略`); continue; }
+    if (!loc.info) { log(`${b.name || b.id} 读不到节点，本次不处理`); unknown = true; continue; }
     const bad = badNode(loc.info);
     if (bad) {
       log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
       await deleteBot(b.id);
-      await tg(`🗑 Botkeep：${b.name || b.id} 在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
-    } else kept.push(`${b.name || b.id} @ ${nodeLabel(loc)}`);
+      await tg(`🗑 Botkeep：${esc(b.name || b.id)} 在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+    } else kept.push(`${esc(b.name || b.id)} @ ${nodeLink(loc)}`);
   }
   if (kept.length) {
     log('账号已有合格服务器，退出');
     if (notify) await tg(`✅ Botkeep：账号里已有服务器（${kept.join(', ')}），无需再抢。`);
     return true;
   }
+  if (unknown) return true; // 读不到节点时保守退出，避免误删/误建
   return false;
 }
 
@@ -193,19 +207,19 @@ async function main() {
           rejects++;
           log(`落在黑名单节点 ${bad}，删除重抢 (${rejects}/${MAX_REJECTS})`);
           await deleteBot(id);
-          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，继续抢。`);
           idemKey = crypto.randomUUID();
           if (rejects >= MAX_REJECTS) { log('本次删除次数已达上限，等下次触发'); return; }
           await sleep(15);
           continue;
         }
-        await tg(`🎉 Botkeep 抢到了！\n服务器：${NAME} ${id}\n节点：${nodeLabel(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
+        await tg(`🎉 Botkeep 抢到了！\n服务器：${esc(NAME)} ${esc(id)}\n节点：${nodeLink(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
         return;
       }
       log(`第${n}次：无容量 - ${avail?.message || ''}`);
       if (/slot/i.test(avail?.message || '')) {
         // 名额被占：可能是上次没删成的黑名单机器
-        if (await handleExisting(false)) { await tg('✅ Botkeep：账号已有合格服务器，停止抢。'); return; }
+        if (await handleExisting(true)) return;
       }
     } catch (e) {
       log(`第${n}次出错：${e.message}`);
@@ -219,6 +233,6 @@ async function main() {
 
 main().catch(async (e) => {
   log('致命错误', e.message);
-  await tg(`⚠️ Botkeep 抢机器脚本出错：${e.message}`);
+  await tg(`⚠️ Botkeep 抢机器脚本出错：${esc(e.message)}`);
   process.exit(1);
 });
