@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       reset_count:
-        description: "重置运行次数（从 0 重新计数）"
+        description: "重置运行次数和尝试领取次数（从 0 重新计数）"
         type: boolean
         default: false
       source:
