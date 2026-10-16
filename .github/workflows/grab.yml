@@ -16,6 +16,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # 读取上次的冷却时间（删机器后暂停 30 分钟）
+      - name: Restore cooldown
+        uses: actions/cache/restore@v4
+        with:
+          path: .cooldown
+          key: botkeep-cooldown-${{ github.run_id }}
+          restore-keys: botkeep-cooldown-
+
       - name: Grab Botkeep server
         run: node grab.mjs
         env:
@@ -24,5 +33,14 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           EXCLUDE_NODES: "node2-it" # 不要的节点，逗号分隔
+          COOLDOWN_MINUTES: "30"    # 删机器后暂停多少分钟
           RUN_SECONDS: "240"
           INTERVAL_SECONDS: "20"
+
+      # 保存冷却时间供下次运行读取
+      - name: Save cooldown
+        if: always() && hashFiles('.cooldown/until') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .cooldown
+          key: botkeep-cooldown-${{ github.run_id }}
