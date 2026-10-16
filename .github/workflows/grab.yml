@@ -33,7 +33,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           EXCLUDE_NODES: "node2-it" # 不要的节点，逗号分隔
-          COOLDOWN_MINUTES: "30"    # 删机器后暂停多少分钟
+          COOLDOWN_MINUTES: "15"    # 删机器后暂停多少分钟
           RUN_SECONDS: "240"
           INTERVAL_SECONDS: "20"
 
