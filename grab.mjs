@@ -1,5 +1,6 @@
 // Botkeep 免费机器抢购脚本 (Node.js 20+)
 // 流程：登录 -> 启动TG通知 -> 轮询容量 -> 有容量立即创建 Node.js 满配服务器 -> 成功TG通知
+import fs from 'node:fs';
 const BASE = 'https://api.botkeep.cloud';
 const SITE = 'https://botkeep.cloud';
 const env = process.env;
@@ -15,7 +16,8 @@ const RES = {
   storageLimitMb: Number(env.STORAGE_MB || 1024),
 };
 const EXCLUDE = (env.EXCLUDE_NODES || 'node2-it').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-const MAX_REJECTS = Number(env.MAX_REJECTS || 3); // 单次运行最多删几次落到黑名单节点的机器
+const COOLDOWN_MIN = Number(env.COOLDOWN_MINUTES || 30); // 删机器后暂停多少分钟
+const COOLDOWN_FILE = env.COOLDOWN_FILE || '.cooldown/until';
 const RUN_SECONDS = Number(env.RUN_SECONDS || 240); // 单次运行轮询总时长
 const INTERVAL_SECONDS = Number(env.INTERVAL_SECONDS || 20); // 轮询间隔，别太小以免触发风控
 
@@ -132,7 +134,9 @@ async function handleExisting(notify = true) {
     if (bad) {
       log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
       await deleteBot(b.id);
-      await tg(`🗑 Botkeep：${esc(b.name || b.id)} 在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+      startCooldown();
+      await tg(`🗑 Botkeep：${esc(b.name || b.id)} 在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
+      throw new Cooldown();
     } else kept.push(`${esc(b.name || b.id)} @ ${nodeLink(loc)}`);
   }
   if (kept.length) {
@@ -144,8 +148,19 @@ async function handleExisting(notify = true) {
   return false;
 }
 
+function cooldownLeft() {
+  try { return Math.max(0, Number(fs.readFileSync(COOLDOWN_FILE, 'utf8')) - Date.now()); } catch { return 0; }
+}
+function startCooldown() {
+  fs.mkdirSync(COOLDOWN_FILE.split('/').slice(0, -1).join('/') || '.', { recursive: true });
+  fs.writeFileSync(COOLDOWN_FILE, String(Date.now() + COOLDOWN_MIN * 60000));
+}
+class Cooldown extends Error {}
+
 async function main() {
   if (!EMAIL || !PASSWORD) throw new Error('缺少 BOTKEEP_EMAIL / BOTKEEP_PASSWORD');
+  const left = cooldownLeft();
+  if (left > 0) { log(`冷却中，还剩 ${Math.ceil(left / 60000)} 分钟，本次跳过`); return; }
 
   await api('/api/v1/auth/login', { method: 'POST', anonymous: true, body: { email: EMAIL, password: PASSWORD } });
   csrf = (await api('/api/v1/auth/session')).csrf_token;
@@ -171,7 +186,6 @@ async function main() {
     storageLimitMb: String(RES.storageLimitMb),
   }).toString();
   let idemKey = crypto.randomUUID();
-  let rejects = 0;
   const deadline = Date.now() + RUN_SECONDS * 1000;
   let n = 0;
 
@@ -204,14 +218,11 @@ async function main() {
         const loc = id ? await botLocation(id, 60) : { info: '', hosts: [] };
         const bad = badNode(loc.info + ' ' + JSON.stringify(bot).toLowerCase());
         if (bad) {
-          rejects++;
-          log(`落在黑名单节点 ${bad}，删除重抢 (${rejects}/${MAX_REJECTS})`);
+          log(`落在黑名单节点 ${bad}，删除并暂停 ${COOLDOWN_MIN} 分钟`);
           await deleteBot(id);
-          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，继续抢。`);
-          idemKey = crypto.randomUUID();
-          if (rejects >= MAX_REJECTS) { log('本次删除次数已达上限，等下次触发'); return; }
-          await sleep(15);
-          continue;
+          startCooldown();
+          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLink(loc)}（黑名单 ${bad}），已删除，暂停 ${COOLDOWN_MIN} 分钟后继续抢。`);
+          return;
         }
         await tg(`🎉 Botkeep 抢到了！\n服务器：${esc(NAME)} ${esc(id)}\n节点：${nodeLink(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
         return;
@@ -232,6 +243,7 @@ async function main() {
 }
 
 main().catch(async (e) => {
+  if (e instanceof Cooldown) { log('进入冷却，本次结束'); return; }
   log('致命错误', e.message);
   await tg(`⚠️ Botkeep 抢机器脚本出错：${esc(e.message)}`);
   process.exit(1);
