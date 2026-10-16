@@ -14,6 +14,8 @@ const RES = {
   cpuLimitPercent: Number(env.CPU_PERCENT || 50),
   storageLimitMb: Number(env.STORAGE_MB || 1024),
 };
+const EXCLUDE = (env.EXCLUDE_NODES || 'node2-it').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+const MAX_REJECTS = Number(env.MAX_REJECTS || 3); // 单次运行最多删几次落到黑名单节点的机器
 const RUN_SECONDS = Number(env.RUN_SECONDS || 240); // 单次运行轮询总时长
 const INTERVAL_SECONDS = Number(env.INTERVAL_SECONDS || 20); // 轮询间隔，别太小以免触发风控
 
@@ -71,6 +73,28 @@ async function tg(text) {
   } catch (e) { log('TG 发送失败', e.message); }
 }
 
+// 取服务器所在节点/地址，返回小写字符串（等待地址分配，最多 waitSec 秒）
+async function botLocation(id, waitSec = 60) {
+  const end = Date.now() + waitSec * 1000;
+  let info = '';
+  while (true) {
+    try {
+      const bot = await api(`/api/v1/panel/bots/${encodeURIComponent(id)}`);
+      const net = await api(`/api/v1/panel/bots/${encodeURIComponent(id)}/network`).catch(() => null);
+      const hosts = (net?.allocations || []).map((a) => a.host).filter(Boolean);
+      info = (JSON.stringify(bot) + ' ' + hosts.join(' ')).toLowerCase();
+      if (hosts.length || /node\d*-[a-z]+/.test(info)) return { info, hosts };
+    } catch (e) { log('读取节点失败', e.message); }
+    if (Date.now() > end) return { info, hosts: [] };
+    await sleep(5);
+  }
+}
+const badNode = (info) => EXCLUDE.find((n) => info.includes(n));
+const nodeLabel = (loc) => loc.hosts[0] || (loc.info.match(/node\d*-[a-z]+[a-z0-9.-]*/) || ['未知节点'])[0];
+async function deleteBot(id) {
+  await api(`/api/v1/panel/bots/${encodeURIComponent(id)}/actions`, { method: 'POST', body: { action: 'delete' } });
+}
+
 async function main() {
   if (!EMAIL || !PASSWORD) throw new Error('缺少 BOTKEEP_EMAIL / BOTKEEP_PASSWORD');
 
@@ -81,9 +105,22 @@ async function main() {
   // 已经有服务器就不再创建，避免重复
   const dash = await api('/api/v1/panel/dashboard');
   if (Array.isArray(dash?.bots) && dash.bots.length > 0) {
-    log('账号已有服务器，退出');
-    await tg(`✅ Botkeep：账号里已有服务器（${dash.bots.map((b) => b.name || b.id).join(', ')}），无需再抢。`);
-    return;
+    let kept = [];
+    for (const b of dash.bots) {
+      const loc = await botLocation(b.id, 5);
+      const bad = badNode(loc.info);
+      if (bad) {
+        log(`已有服务器 ${b.name || b.id} 在黑名单节点 ${bad}，删除`);
+        await deleteBot(b.id);
+        await tg(`🗑 Botkeep：${b.name || b.id} 在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+        await sleep(15);
+      } else kept.push(`${b.name || b.id} @ ${nodeLabel(loc)}`);
+    }
+    if (kept.length) {
+      log('账号已有合格服务器，退出');
+      await tg(`✅ Botkeep：账号里已有服务器（${kept.join(', ')}），无需再抢。`);
+      return;
+    }
   }
 
   // 取 Node.js 版本和默认启动命令
@@ -102,7 +139,8 @@ async function main() {
     cpuLimitPercent: String(RES.cpuLimitPercent),
     storageLimitMb: String(RES.storageLimitMb),
   }).toString();
-  const idemKey = crypto.randomUUID();
+  let idemKey = crypto.randomUUID();
+  let rejects = 0;
   const deadline = Date.now() + RUN_SECONDS * 1000;
   let n = 0;
 
@@ -132,7 +170,19 @@ async function main() {
         });
         const id = bot?.id || bot?.bot?.id || '';
         log('创建成功', JSON.stringify(bot).slice(0, 300));
-        await tg(`🎉 Botkeep 抢到了！\n服务器：${NAME} ${id}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
+        const loc = id ? await botLocation(id, 60) : { info: '', hosts: [] };
+        const bad = badNode(loc.info + ' ' + JSON.stringify(bot).toLowerCase());
+        if (bad) {
+          rejects++;
+          log(`落在黑名单节点 ${bad}，删除重抢 (${rejects}/${MAX_REJECTS})`);
+          await deleteBot(id);
+          await tg(`🗑 Botkeep：抢到的机器在 ${nodeLabel(loc)}（黑名单 ${bad}），已删除，继续抢。`);
+          idemKey = crypto.randomUUID();
+          if (rejects >= MAX_REJECTS) { log('本次删除次数已达上限，等下次触发'); return; }
+          await sleep(15);
+          continue;
+        }
+        await tg(`🎉 Botkeep 抢到了！\n服务器：${NAME} ${id}\n节点：${nodeLabel(loc)}\n${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% / ${RES.storageLimitMb}MB\n${SITE}/app`);
         return;
       }
       log(`第${n}次：无容量 - ${avail?.message || ''}`);
