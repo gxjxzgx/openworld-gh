@@ -206,7 +206,16 @@ async function main() {
   log('运行时', RUNTIME, runtimeVersion || '(未开放)', '启动命令', startCommand);
 
   const notice = startNotice();
-  if (notice.send) await tg(`🚀 Botkeep 抢机器服务${IS_WORKER ? '运行中（每小时通知一次）' : '已开启'}${notice.line ? `\n${notice.line}` : ''}\n配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB\n本次轮询 ${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次\n触发：${esc(env.TRIGGER || '未知')}\n出口：${LOCAL_PROXY ? `代理 ${esc(env.PROXY_IP || '')}` : '直连（GitHub）'}`);
+  const exitIp = LOCAL_PROXY ? `${esc(env.PROXY_IP || '未知')}（代理）` : 'GitHub（直连）';
+  if (notice.send) await tg([
+    `🚀 Botkeep 抢机器服务${IS_WORKER ? '运行中（每小时通知）' : '已开启'}`,
+    ...(notice.line ? [notice.line] : []),
+    '',
+    `触发：${esc(env.TRIGGER || '未知')}`,
+    `出口：${exitIp}`,
+    `轮询：${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次`,
+    `配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB`,
+  ].join('\n'));
   else log(`本小时已通知过，跳过 TG（${notice.line}）`);
 
   const qs = new URLSearchParams({
