@@ -22,6 +22,15 @@ const COOLDOWN_FILE = env.COOLDOWN_FILE || '.cooldown/until';
 const RUN_SECONDS = Number(env.RUN_SECONDS || 240); // 单次运行轮询总时长
 const INTERVAL_SECONDS = Number(env.INTERVAL_SECONDS || 20); // 轮询间隔，别太小以免触发风控
 
+// 可选代理：PROXY_URL=http://127.0.0.1:端口（由 start_proxy.py 根据 NODE_LINK 生成），只代理 Botkeep 请求
+const PROXY_URL = env.PROXY_URL || '';
+let bkFetch = fetch;
+if (PROXY_URL) {
+  const { fetch: ufetch, ProxyAgent } = await import('undici');
+  const dispatcher = new ProxyAgent(PROXY_URL);
+  bkFetch = (url, opts = {}) => ufetch(url, { ...opts, dispatcher });
+}
+
 const jar = new Map();
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -51,7 +60,7 @@ async function api(path, { method = 'GET', body, headers = {}, anonymous = false
     if (!csrf) csrf = (await api('/api/v1/auth/session')).csrf_token;
     h['X-CSRF-Token'] = csrf;
   }
-  const res = await fetch(BASE + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await bkFetch(BASE + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
   saveCookies(res);
   const text = await res.text();
   let data = null;
@@ -178,7 +187,7 @@ async function main() {
   const startCommand = caps?.runtimeOptions?.[RUNTIME]?.[runtimeVersion]?.command || 'npm start';
   log('运行时', RUNTIME, runtimeVersion || '(未开放)', '启动命令', startCommand);
 
-  await tg(`🚀 Botkeep 抢机器服务已开启\n配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB\n本次轮询 ${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次`);
+  await tg(`🚀 Botkeep 抢机器服务已开启\n配置：${RUNTIME} ${runtimeVersion} / ${RES.memoryLimitMb}MB / ${RES.cpuLimitPercent}% CPU / ${RES.storageLimitMb}MB\n本次轮询 ${RUN_SECONDS}s，每 ${INTERVAL_SECONDS}s 一次\n出口：${PROXY_URL ? `代理 ${esc(env.PROXY_IP || '')}` : '直连（GitHub）'}`);
 
   const qs = new URLSearchParams({
     runtime: RUNTIME,
